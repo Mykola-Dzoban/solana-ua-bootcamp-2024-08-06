@@ -1,9 +1,9 @@
 import "dotenv/config";
 import {
   Connection, clusterApiUrl, Keypair, PublicKey, sendAndConfirmTransaction, Transaction,
+  SystemProgram
 } from "@solana/web3.js";
 import { getExplorerLink } from "@solana-developers/helpers";
-// Yes, createCreate! We're making an instruction for createMetadataV3...
 import { createCreateMetadataAccountV3Instruction } from "@metaplex-foundation/mpl-token-metadata";
 import { createMultisig } from "@solana/spl-token";
 
@@ -15,19 +15,18 @@ if (privateKey === undefined) {
 const asArray = Uint8Array.from(JSON.parse(privateKey));
 const user = Keypair.fromSecretKey(asArray);
 
-const connection = new Connection(clusterApiUrl("devnet"));
+const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
 const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
   "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 );
 
 const tokenMintAccount = new PublicKey(
-  "BZo6hwTPBDuZvbwfBgi8ruQKkC8vLSocAhSpgSeZ7Vka"
+  "133AGCG8kkbXjproN4Smu35fRymxS5XbxP9iUjQhEioL"
 );
 
 const metadataData = {
   name: "Solana UA Bootcamp 2024-08-06 MD",
   symbol: "UAB-2",
-  // Arweave / IPFS / Pinata etc link using metaplex standard for off-chain data
   uri: "https://arweave.net/1234",
   sellerFeeBasisPoints: 0,
   creators: null,
@@ -43,6 +42,7 @@ const [metadataPDA, _metadataBump] = PublicKey.findProgramAddressSync(
   TOKEN_METADATA_PROGRAM_ID
 );
 
+// Create transaction for metadata account creation
 const transaction = new Transaction();
 const createMetadataAccountInstruction =
   createCreateMetadataAccountV3Instruction(
@@ -62,6 +62,19 @@ const createMetadataAccountInstruction =
     }
   );
 transaction.add(createMetadataAccountInstruction);
+
+// Create an instruction to delegate transaction fees to the receiver
+const receiverPublicKey = new PublicKey("6BNUJnyhtcJjDcwaGWZk25PX9x1rA7EMJXfveY7w3fr6"); // Replace with the actual receiver's public key
+const transferInstruction = SystemProgram.transfer({
+  fromPubkey: user.publicKey,
+  toPubkey: receiverPublicKey,
+  lamports: await connection.getMinimumBalanceForRentExemption(1) 
+});
+transaction.add(transferInstruction);
+
+console.log(`Created instruction to delegate transaction fees to ${receiverPublicKey}`);
+
+// Send transaction
 await sendAndConfirmTransaction(
   connection,
   transaction,
@@ -75,13 +88,10 @@ const tokenMintLink = getExplorerLink(
 );
 console.log(`✅ Look at the token mint again: ${tokenMintLink}`);
 
-
 const multisigKey = await createMultisig(
   connection,
   user,
-  [
-    user.publicKey,
-  ],
+  [user.publicKey],
   2
 );
 
