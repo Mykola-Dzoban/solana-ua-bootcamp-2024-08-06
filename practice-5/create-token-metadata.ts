@@ -1,12 +1,13 @@
 import "dotenv/config";
 import {
-  Connection, clusterApiUrl, Keypair, PublicKey, sendAndConfirmTransaction, Transaction,
-  SystemProgram
+  Connection, clusterApiUrl, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction,
+  TransactionInstruction, LAMPORTS_PER_SOL
 } from "@solana/web3.js";
 import { getExplorerLink } from "@solana-developers/helpers";
 import { createCreateMetadataAccountV3Instruction } from "@metaplex-foundation/mpl-token-metadata";
 import { createMultisig } from "@solana/spl-token";
 
+// Load environment variables
 let privateKey = process.env["SECRET_KEY"];
 if (privateKey === undefined) {
   console.log("Add SECRET_KEY to .env!");
@@ -21,7 +22,7 @@ const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
 );
 
 const tokenMintAccount = new PublicKey(
-  "133AGCG8kkbXjproN4Smu35fRymxS5XbxP9iUjQhEioL"
+  "ASraEcnwp6nruMyFTAa3LwTCYR6i3dsDrsf4Xq22J5Xc"
 );
 
 const metadataData = {
@@ -42,44 +43,79 @@ const [metadataPDA, _metadataBump] = PublicKey.findProgramAddressSync(
   TOKEN_METADATA_PROGRAM_ID
 );
 
+// Create a new nonce account
+const nonceAccount = Keypair.generate();
+const nonceAccountPublicKey = nonceAccount.publicKey;
+
+console.log(`Generated Nonce Account PublicKey: ${nonceAccountPublicKey.toBase58()}`);
+
+// Fund the nonce account
+const lamports = await connection.getMinimumBalanceForRentExemption(128);
+console.log(`Minimum balance required for nonce account: ${lamports} lamports`);
+
+// Create nonce account instruction
+const createNonceAccountInstruction = SystemProgram.createAccount({
+  fromPubkey: user.publicKey,
+  newAccountPubkey: nonceAccountPublicKey,
+  lamports: lamports,
+  space: 256, // space required for nonce account; usually 256 bytes
+  programId: SystemProgram.programId,
+});
+
+// Initialize the nonce account
+const initializeNonceAccountInstruction = new TransactionInstruction({
+  keys: [
+    { pubkey: nonceAccountPublicKey, isSigner: false, isWritable: true },
+    { pubkey: user.publicKey, isSigner: true, isWritable: false },
+  ],
+  programId: SystemProgram.programId,
+  data: Buffer.from([0]), // 0 for nonce initialization
+});
+
+console.log(`Created nonce account instructions`);
+
 // Create transaction for metadata account creation
-const transaction = new Transaction();
-const createMetadataAccountInstruction =
-  createCreateMetadataAccountV3Instruction(
-    {
-      metadata: metadataPDA,
-      mint: tokenMintAccount,
-      mintAuthority: user.publicKey,
-      payer: user.publicKey,
-      updateAuthority: user.publicKey,
+const transaction = new Transaction().add(
+  createNonceAccountInstruction,
+  initializeNonceAccountInstruction
+);
+
+const createMetadataAccountInstruction = createCreateMetadataAccountV3Instruction(
+  {
+    metadata: metadataPDA,
+    mint: tokenMintAccount,
+    mintAuthority: user.publicKey,
+    payer: user.publicKey,
+    updateAuthority: user.publicKey,
+  },
+  {
+    createMetadataAccountArgsV3: {
+      collectionDetails: null,
+      data: metadataData,
+      isMutable: true,
     },
-    {
-      createMetadataAccountArgsV3: {
-        collectionDetails: null,
-        data: metadataData,
-        isMutable: true,
-      },
-    }
-  );
+  }
+);
 transaction.add(createMetadataAccountInstruction);
 
-// Create an instruction to delegate transaction fees to the receiver
-const receiverPublicKey = new PublicKey("6BNUJnyhtcJjDcwaGWZk25PX9x1rA7EMJXfveY7w3fr6"); // Replace with the actual receiver's public key
-const transferInstruction = SystemProgram.transfer({
-  fromPubkey: user.publicKey,
-  toPubkey: receiverPublicKey,
-  lamports: await connection.getMinimumBalanceForRentExemption(1) 
-});
-transaction.add(transferInstruction);
+console.log(`Added metadata creation instruction to transaction`);
 
-console.log(`Created instruction to delegate transaction fees to ${receiverPublicKey}`);
+// Set recent blockhash and fee payer
+transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+transaction.feePayer = user.publicKey;
+
+console.log(`Transaction setup complete. Sending transaction...`);
 
 // Send transaction
-await sendAndConfirmTransaction(
-  connection,
-  transaction,
-  [user]
-);
+try {
+  const signature = await sendAndConfirmTransaction(
+    connection,
+    transaction,
+    [user, nonceAccount]
+  );
+} catch (error) {
+  console.error(`Transaction failed: ${error}`);
+}
 
 const tokenMintLink = getExplorerLink(
   "address",
@@ -88,11 +124,14 @@ const tokenMintLink = getExplorerLink(
 );
 console.log(`✅ Look at the token mint again: ${tokenMintLink}`);
 
-const multisigKey = await createMultisig(
-  connection,
-  user,
-  [user.publicKey],
-  2
-);
-
-console.log(`Created 1/3 multisig ${multisigKey.toBase58()}`);
+try {
+  const multisigKey = await createMultisig(
+    connection,
+    user,
+    [user.publicKey],
+    2
+  );
+  console.log(`Created 1/3 multisig ${multisigKey.toBase58()}`);
+} catch (error) {
+  console.error(`Failed to create multisig: ${error}`);
+}
