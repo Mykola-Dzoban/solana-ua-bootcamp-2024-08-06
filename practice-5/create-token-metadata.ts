@@ -5,6 +5,7 @@ import {
 import { getExplorerLink } from "@solana-developers/helpers";
 // Yes, createCreate! We're making an instruction for createMetadataV3...
 import { createCreateMetadataAccountV3Instruction } from "@metaplex-foundation/mpl-token-metadata";
+import { createMultisig } from "@solana/spl-token";
 
 let privateKey = process.env["SECRET_KEY"];
 if (privateKey === undefined) {
@@ -20,11 +21,11 @@ const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
 );
 
 const tokenMintAccount = new PublicKey(
-  "E6pyfTsV6YhsTrKkA48w2pDQmVzRCRg2z6gFQSJDiZ5q"
+  "BZo6hwTPBDuZvbwfBgi8ruQKkC8vLSocAhSpgSeZ7Vka"
 );
 
 const metadataData = {
-  name: "Solana UA Bootcamp 2024-08-06",
+  name: "Solana UA Bootcamp 2024-08-06 MD",
   symbol: "UAB-2",
   // Arweave / IPFS / Pinata etc link using metaplex standard for off-chain data
   uri: "https://arweave.net/1234",
@@ -73,3 +74,15 @@ const tokenMintLink = getExplorerLink(
   "devnet"
 );
 console.log(`✅ Look at the token mint again: ${tokenMintLink}`);
+
+
+const multisigKey = await createMultisig(
+  connection,
+  user,
+  [
+    user.publicKey,
+  ],
+  2
+);
+
+console.log(`Created 1/3 multisig ${multisigKey.toBase58()}`);
